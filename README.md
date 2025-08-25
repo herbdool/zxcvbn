@@ -7,12 +7,8 @@ Zxcvbn-PHP is a password strength estimator using pattern matching and minimum e
 
 > zxcvbn attempts to give sound password advice through pattern matching and conservative entropy calculations. It finds 10k common passwords, common American names and surnames, common English words, and common patterns like dates, repeats (aaa), sequences (abcd), and QWERTY patterns.
 
-## Discussion
-
-Ongoing discussions in these issues about incorporating this into core:
-
-* <https://github.com/backdrop/backdrop-issues/issues/5220>
-* <https://github.com/backdrop/backdrop-issues/issues/4603>
+There is an [ongoing discussion](https://github.com/backdrop/backdrop-issues/issues/4603)
+about incorporating this library into core.
 
 ## License
 

@@ -9,11 +9,11 @@
 /**
  * Password strength levels: weak, fair, good and strong.
  */
-define('ZXCVBN_PASSWORD_STRENGTH_WEAK', 0);
-define('ZXCVBN_PASSWORD_STRENGTH_FAIR', 1);
-define('ZXCVBN_PASSWORD_STRENGTH_GOOD', 2);
-define('ZXCVBN_PASSWORD_STRENGTH_STRONG', 3);
-define('ZXCVBN_PASSWORD_STRENGTH_EXCELLENT', 4);
+define('ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK', 0);
+define('ZXCVBN_PASSWORD_STRENGTH_WEAK', 1);
+define('ZXCVBN_PASSWORD_STRENGTH_FAIR', 2);
+define('ZXCVBN_PASSWORD_STRENGTH_GOOD', 3);
+define('ZXCVBN_PASSWORD_STRENGTH_STRONG', 4);
 
 /**
  * Implements hook_autoload_info().
@@ -56,14 +56,29 @@ function zxcvbn_autoload_info() {
 }
 
 /**
+ * Implements hook_menu().
+ */
+function zxcvbn_menu() {
+  $items['zxcvbn-password-strength'] = array(
+    'title' => 'Password strength feedback',
+    'page callback' => 'zxcvbn_password_strength_feedback',
+    'delivery callback' => 'backdrop_json_deliver',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
  * Implements hook_element_info_alter().
  */
 function zxcvbn_element_info_alter(&$type) {
   if (isset($type['password']['#process'])) {
-    $type['password']['#process'] = array('zxcvbn_form_process_password');
+    $type['password']['#process'] = array('ajax_process_form', 'zxcvbn_form_process_password');
   }
   if (isset($type['password_confirm']['#process'])) {
-    $type['password_confirm']['#process'] = array('zxcvbn_form_process_password_confirm');
+    $type['password_confirm']['#process'] = array('form_process_password_confirm', 'zxcvbn_form_process_password_confirm');
   }
 }
 
@@ -92,19 +107,19 @@ function zxcvbn_form_process_password($element, $form_state = array()) {
     }
     $strength_settings = array(
       'scores' => array(
-        'weak' => ZXCVBN_PASSWORD_STRENGTH_WEAK,
-        'fair' => ZXCVBN_PASSWORD_STRENGTH_FAIR,
-        'good' => ZXCVBN_PASSWORD_STRENGTH_GOOD,
-        'strong' => ZXCVBN_PASSWORD_STRENGTH_STRONG,
-        'excellent' => ZXCVBN_PASSWORD_STRENGTH_EXCELLENT,
+        ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK => 'very-weak',
+        ZXCVBN_PASSWORD_STRENGTH_WEAK => 'weak',
+        ZXCVBN_PASSWORD_STRENGTH_FAIR => 'fair',
+        ZXCVBN_PASSWORD_STRENGTH_GOOD => 'good',
+        ZXCVBN_PASSWORD_STRENGTH_STRONG => 'strong',
       ),
       'labels' => array(
         'strengthTitle' => t('Password strength: '),
-        'weak' => t('weak'),
-        'fair' => t('fair'),
-        'good' => t('good'),
-        'strong' => t('strong'),
-        'strong' => t('excellent'),
+        ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK => t('very weak'),
+        ZXCVBN_PASSWORD_STRENGTH_WEAK => t('weak'),
+        ZXCVBN_PASSWORD_STRENGTH_FAIR => t('fair'),
+        ZXCVBN_PASSWORD_STRENGTH_GOOD => t('good'),
+        ZXCVBN_PASSWORD_STRENGTH_STRONG => t('strong'),
       ),
       'data' => array(
         'username' => $username,
@@ -160,31 +175,33 @@ function zxcvbn_form_process_password_confirm($element) {
  * @see user_account_form()
  */
 function zxcvbn_form_alter(&$form, &$form_state, $form_id) {
-  if (!in_array($form_id, ['user_account_form', 'user_pass_reset_form', 'user_profile_form', 'user_register_form', 'user_form_process_password'])) {
-    return;
-  }
+  $form_ids = ['user_account_form', 'user_pass_reset_form', 'user_profile_form', 'user_register_form', 'user_form_process_password', 'user_admin_settings'];
+  if (in_array($form_id, $form_ids)) {
+    $help = _zxcvbn_password_policy_help();
 
-  // Replace validation which is enabled if someone enables "Reject weak passwords".
-  if (in_array('user_password_policy_validate', $form['#validate'])) {
-    // Add own validation instead.
-    $form['#validate'] = array_filter($form['#validate'], static function   ($element) {
-      return $element !== 'user_password_policy_validate';
-    });
-    $form['#validate'][] = 'zxcvbn_password_policy_validate';
+    // Replace validation which is enabled if a user is required to provide a
+    // strong password.
+    $reject_weak_passwords = config_get('system.core', 'user_password_reject_weak');
+    if ($reject_weak_passwords && in_array('user_password_policy_validate', $form['#validate'])) {
+      // Add own validation instead.
+      $form['#validate'] = array_filter($form['#validate'], static function   ($element) {
+        return $element !== 'user_password_policy_validate';
+      });
+      $form['#validate'][] = 'zxcvbn_password_policy_validate';
 
-    // user_profile_form
-    if (isset($form['account']['pass']['#description'])) {
-      $form['account']['pass']['#description'] = _zxcvbn_password_policy_help();
+      if (isset($form['account']['pass']['#description'])) {
+        $form['account']['pass']['#description'] = $help;
+      }
+      if (isset($form['pass']['#description'])) {
+        $form['pass']['#description'] = $help;
+      }
     }
 
-    if (isset($form['pass']['#description'])) {
-      $form['pass']['#description'] = _zxcvbn_password_policy_help();
+    if (isset($form['password_policy']['user_password_reject_weak']['#description'])) {
+      $form['password_policy']['user_password_reject_weak']['#description'] = $help;
     }
   }
 }
-
-// @todo also alter user_admin_settings:
-// $form['password_policy']['#description']
 
 /**
  * Validation callback for password constraints.
@@ -232,8 +249,19 @@ function zxcvbn_password_policy_validate($form, &$form_state) {
 }
 
 /**
+ * AJAX callback
+ */
+function zxcvbn_password_strength_feedback() {
+  $strength = [];
+  if (!empty($_POST['passwordInput'])) {
+    $settings = $_POST['passwordStrengthSettings'];
+    $strength = _zxcvbn_password_evaluate_strength($_POST['passwordInput'], $settings['data']['username'], $settings['data']['email']);
+  }
+  return $strength;
+}
+
+/**
  * Evaluate password strength
- * Adapted from https://github.com/dropbox/zxcvbn.
  *
  * @param string $password
  * @param string $username
@@ -257,8 +285,11 @@ function _zxcvbn_password_evaluate_strength($password, $username, $email) {
 function _zxcvbn_password_policy_help() {
   $criteria = array();
   $criteria[] = t('The password cannot be the same as the username or email address.');
-  $criteria[] = t('The password is weaker if it includes any common patterns like dates, repeating characters, sequences, and keyboard patterns.');
-  $criteria[] = t('The password is weaker if it includes commonly-used passwords, common American names and surnames or common English words.');
+  $criteria[] = t('The password is stronger if it does not include any common patterns like dates, repeating characters, sequences, and keyboard patterns.');
+  $criteria[] = t('The password is stronger if it does not include commonly-used passwords, common American names and surnames, nor common English words.');
 
-  return t('The following criteria must be met:') . '</div>' . theme('item_list', array('items' => $criteria, 'type' => 'ul'));
+  $help = '<div class="password-strength-help-text fair">' . t('The password strength indicator must be %threshold or better.', array('%threshold' => t('fair')));
+  $help .= ' ' . t('Meet the following criteria:') . '</div>' . theme('item_list', array('items' => $criteria, 'type' => 'ul'));
+
+  return $help;
 }

@@ -3,40 +3,49 @@
 /**
  * Attach handlers to evaluate the strength of any password fields.
  */
-// @todo enable when this can be populated via AJAX.
-// Backdrop.behaviors.passwordStrength = {
-//   attach: function (context, settings) {
-//     $('input[data-password-strength]', context).once('password-strength', function () {
-//       var $passwordInput = $(this);
-//       var passwordStrengthSettings = $passwordInput.data('passwordStrength');
-//       var passwordMeter = '<span class="password-strength"><span class="password-strength-title">' + passwordStrengthSettings.labels.strengthTitle + '</span><span class="password-strength-text" aria-live="assertive"></span><span class="password-indicator"><span class="indicator"></span></span></span>';
-//       $passwordInput.wrap('<span class="password-strength-wrapper"></span>').after(passwordMeter);
-//       var $innerWrapper = $passwordInput.parent();
-//       var $indicatorBar = $innerWrapper.find('.indicator');
-//       var $strengthText = $innerWrapper.find('.password-strength-text');
-//       var $strengthWrapper = $innerWrapper.find('.password-strength');
+Backdrop.behaviors.passwordStrength = {
+  attach: function (context, settings) {
+    $('input[data-password-strength]', context).once('password-strength', function () {
+      var $passwordInput = $(this);
+      var passwordStrengthSettings = $passwordInput.data('passwordStrength');
+      var passwordMeter = '<span class="password-strength"><span class="password-strength-title">' + passwordStrengthSettings.labels.strengthTitle + '</span><span class="password-strength-text" aria-live="assertive"></span><span class="password-indicator"><span class="indicator"></span></span></span>';
+      $passwordInput.wrap('<span class="password-strength-wrapper"></span>').after(passwordMeter);
+      var $innerWrapper = $passwordInput.parent();
+      var $indicatorBar = $innerWrapper.find('.indicator');
+      var $strengthText = $innerWrapper.find('.password-strength-text');
+      var $strengthWrapper = $innerWrapper.find('.password-strength');
 
-//       // Check the password strength.
-//       var passwordCheck = function () {
-//         // Evaluate the password strength.
-//         var result = Backdrop.evaluatePasswordStrength($passwordInput.val(), passwordStrengthSettings);
+      // Check the password strength.
+      var passwordCheck = function () {
+        // Evaluate the password strength.
+        $.ajax({
+          url: '/zxcvbn-password-strength',
+          type: 'POST',
+          data: {
+            passwordInput: $passwordInput.val(),
+            passwordStrengthSettings: passwordStrengthSettings
+          },
+          dataType: 'json',
+          success: function (result) {
+            // Adjust the length of the strength indicator.
+            var strengthBar = result.score * 25;
+            $indicatorBar.css('width', strengthBar + '%');
 
-//         // Adjust the length of the strength indicator.
-//         $indicatorBar.css('width', result.strength + '%');
+            // Update the strength indication text.
+            $strengthText.html(passwordStrengthSettings.labels[result.score]);
 
-//         // Update the strength indication text.
-//         $strengthText.html(passwordStrengthSettings.labels[result.level]);
+            // Give a class to the strength.
+            $strengthWrapper.attr('class', 'password-strength ' + passwordStrengthSettings.scores[result.score]);
+          }
+        });
+      };
 
-//         // Give a class to the strength.
-//         $strengthWrapper.attr('class', 'password-strength ' + result.level);
-//       };
-
-//       // Monitor keyup and blur events.
-//       // Blur must be used because a mouse paste does not trigger keyup.
-//       $passwordInput.on('keyup focus blur', passwordCheck).triggerHandler('blur');
-//     });
-//   }
-// };
+      // Monitor keyup and blur events.
+      // Blur must be used because a mouse paste does not trigger keyup.
+      $passwordInput.on('keyup focus blur', passwordCheck).triggerHandler('blur');
+    });
+  }
+};
 
 /**
  * Attach handlers to toggle visibility of the password.
@@ -137,97 +146,6 @@ Backdrop.behaviors.passwordConfirm = {
       $confirmInput.on('keyup blur', passwordCheckMatch).triggerHandler('blur');
     });
   }
-};
-
-/**
- * Evaluate the strength of a user's password.
- *
- * Returns the estimated strength and the relevant output message.
- */
-Backdrop.evaluatePasswordStrength = function (password, settings) {
-  var strength = 0;
-  var level = 'empty';
-  var data = settings.data;
-  var config = settings.config;
-  var username = data.username;
-  var email = data.email;
-  var hasLowercase = /[a-z]+/.test(password);
-  var hasUppercase = /[A-Z]+/.test(password);
-  var hasNumbers = /[0-9]+/.test(password);
-  var hasPunctuation = /[^a-zA-Z0-9]+/.test(password);
-
-  // If there is a username or email field on the page, compare the password to
-  // that; otherwise use the value from the database.
-  var usernameBox = $('input.username');
-  if (usernameBox.length > 0) {
-    username = usernameBox.val();
-  }
-  var emailBox = $('input.form-email');
-  if (emailBox.length > 0) {
-    email = emailBox.val();
-  }
-
-  // The strength estimator is adapted from the "naive strength estimation"
-  // found in https://dropbox.tech/security/zxcvbn-realistic-password-strength-estimation.
-  //
-  // Strength is best measured as entropy. A more random password has a higher
-  // entropy, and, therefore, is harder to guess. The naive strength estimation
-  // looks like this:
-  //
-  // n: password length
-  // c: password cardinality: the size of the symbol space
-  //    (26 for lowercase letters only, 62 for a mix of lower+upper+numbers)
-  // entropy = n * lg(c)
-  //
-  // This equation gives the entropy in units of "bits" (per symbol) because it
-  // is using a logarithm of base 2. It's the number of times a space of
-  // possible passwords can be cut in half. The length of a password has much
-  // more influence on the entropy (that is, strength) than the diversity of
-  // symbols. For example, "correcthorsebatterystaple" is a stronger password
-  // than "aaAA11!!" even though the latter has a higher cardinality (symbol
-  // diversity).
-
-  // Calculate the number of unique character sets within a string.
-  var cardinality = (hasLowercase * 26) + (hasUppercase * 26) + (hasNumbers * 10) + (hasPunctuation * 33);
-
-  // Assign strength based on the level of entropy within the password, times
-  // its length. Again, adapted from zxcvbn.
-  strength = (Math.log(cardinality) / Math.log(2)) * password.length + 1;
-
-  // Adjust the strength so that we hit our desired password length for each
-  // threshold. As computers improve, the recommended minimum length increases.
-  strength = strength * config.strengthModifier;
-
-  // Check if password is the same as the username or email.
-  if (password !== '') {
-    password = password.toLowerCase();
-    username = username.toLowerCase();
-    email = email.toLowerCase();
-
-    if (password === username || password === email) {
-      strength = 5;
-    }
-  }
-
-  // Based on the strength, work out what text should be shown by the password strength meter.
-  if (strength >= 90) {
-    level = 'strong';
-  }
-  else if (strength > 70) {
-    level = 'good';
-  }
-  else if (strength > 50) {
-    level = 'fair';
-  }
-  else if (strength > 0) {
-    level = 'weak';
-  }
-
-  // Cap at 100 and round to the nearest integer.
-  strength = parseInt(Math.min(strength, 100));
-
-  // Assemble the final message.
-  return { strength: strength, level: level };
 };
 
 /**
