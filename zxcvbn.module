@@ -1,0 +1,264 @@
+<?php
+
+/**
+ * @file module
+ * ZXCVBN Password Strength Estimator
+ *
+ */
+
+/**
+ * Password strength levels: weak, fair, good and strong.
+ */
+define('ZXCVBN_PASSWORD_STRENGTH_WEAK', 0);
+define('ZXCVBN_PASSWORD_STRENGTH_FAIR', 1);
+define('ZXCVBN_PASSWORD_STRENGTH_GOOD', 2);
+define('ZXCVBN_PASSWORD_STRENGTH_STRONG', 3);
+define('ZXCVBN_PASSWORD_STRENGTH_EXCELLENT', 4);
+
+/**
+ * Implements hook_autoload_info().
+ */
+function zxcvbn_autoload_info() {
+  return array(
+    'ZxcvbnPhp\Zxcvbn' => 'includes/zxcvbn-php/src/Zxcvbn.php',
+    'ZxcvbnPhp\TimeEstimator' => 'includes/zxcvbn-php/src/TimeEstimator.php',
+    'ZxcvbnPhp\Scorer' => 'includes/zxcvbn-php/src/Scorer.php',
+    'ZxcvbnPhp\Matcher' => 'includes/zxcvbn-php/src/Matcher.php',
+    'ZxcvbnPhp\Feedback' => 'includes/zxcvbn-php/src/Feedback.php',
+    // Math
+    // interface
+    'ZxcvbnPhp\Math\BinomialProvider' => 'includes/zxcvbn-php/src/Math/BinomialProvider.php',
+    'ZxcvbnPhp\Math\Binomial' => 'includes/zxcvbn-php/src/Math/Binomial.php',
+    // Impl
+    // abstract class
+    'ZxcvbnPhp\Math\Impl\AbstractBinomialProvider' => 'includes/zxcvbn-php/src/Math/Impl/AbstractBinomialProvider.php',
+    'ZxcvbnPhp\Math\Impl\AbstractBinomialProviderWithFallback' => 'includes/zxcvbn-php/src/Math/Impl/AbstractBinomialProviderWithFallback.php',
+    // classes
+    'ZxcvbnPhp\Math\Impl\BinomialProviderFloat64' => 'includes/zxcvbn-php/src/Math/Impl/BinomialProviderFloat64.php',
+    'ZxcvbnPhp\Math\Impl\BinomialProviderInt64' => 'includes/zxcvbn-php/src/Math/Impl/BinomialProviderInt64.php',
+    'ZxcvbnPhp\Math\Impl\BinomialProviderPhp73Gmp' => 'includes/zxcvbn-php/src/Math/Impl/BinomialProviderPhp73Gmp.php',
+    // Matchers
+    // interface
+    'ZxcvbnPhp\Matchers\MatchInterface' => 'includes/zxcvbn-php/src/Matchers/MatchInterface.php',
+    // abstract class
+    'ZxcvbnPhp\Matchers\BaseMatch' => 'includes/zxcvbn-php/src/Matchers/BaseMatch.php',
+    // classes
+    'ZxcvbnPhp\Matchers\Bruteforce' => 'includes/zxcvbn-php/src/Matchers/Bruteforce.php',
+    'ZxcvbnPhp\Matchers\DateMatch' => 'includes/zxcvbn-php/src/Matchers/DateMatch.php',
+    'ZxcvbnPhp\Matchers\DictionaryMatch' => 'includes/zxcvbn-php/src/Matchers/DictionaryMatch.php',
+    'ZxcvbnPhp\Matchers\L33tMatch' => 'includes/zxcvbn-php/src/Matchers/L33tMatch.php',
+    'ZxcvbnPhp\Matchers\RepeatMatch' => 'includes/zxcvbn-php/src/Matchers/RepeatMatch.php',
+    'ZxcvbnPhp\Matchers\ReverseDictionaryMatch' => 'includes/zxcvbn-php/src/Matchers/ReverseDictionaryMatch.php',
+    'ZxcvbnPhp\Matchers\SequenceMatch' => 'includes/zxcvbn-php/src/Matchers/SequenceMatch.php',
+    'ZxcvbnPhp\Matchers\SpatialMatch' => 'includes/zxcvbn-php/src/Matchers/SpatialMatch.php',
+    'ZxcvbnPhp\Matchers\YearMatch' => 'includes/zxcvbn-php/src/Matchers/YearMatch.php',
+  );
+}
+
+/**
+ * Implements hook_element_info_alter().
+ */
+function zxcvbn_element_info_alter(&$type) {
+  if (isset($type['password']['#process'])) {
+    $type['password']['#process'] = array('zxcvbn_form_process_password');
+  }
+  if (isset($type['password_confirm']['#process'])) {
+    $type['password_confirm']['#process'] = array('zxcvbn_form_process_password_confirm');
+  }
+}
+
+/**
+ * Form element process handler for client-side password hide/show and strength.
+ *
+ * @param array $element
+ *   The form element to process.
+ * @param array $form_state
+ *   The $form_state array of the form this element belongs to.
+ */
+function zxcvbn_form_process_password($element, $form_state = array()) {
+  global $user;
+
+  if ($element['#password_strength']) {
+    if (isset($form_state['user']) && is_a($form_state['user'], 'User')) {
+      // Existing account, not the current user if an admin edits an account.
+      $username = $form_state['user']->name;
+      $email = $form_state['user']->mail;
+    }
+    else {
+      // The AnonymousUser object has no mail property, and name is NULL.
+      // The User object has both mail and name set.
+      $username = (isset($user->name) ? $user->name : '');
+      $email = (isset($user->mail) ? $user->mail : '');
+    }
+    $strength_settings = array(
+      'scores' => array(
+        'weak' => ZXCVBN_PASSWORD_STRENGTH_WEAK,
+        'fair' => ZXCVBN_PASSWORD_STRENGTH_FAIR,
+        'good' => ZXCVBN_PASSWORD_STRENGTH_GOOD,
+        'strong' => ZXCVBN_PASSWORD_STRENGTH_STRONG,
+        'excellent' => ZXCVBN_PASSWORD_STRENGTH_EXCELLENT,
+      ),
+      'labels' => array(
+        'strengthTitle' => t('Password strength: '),
+        'weak' => t('weak'),
+        'fair' => t('fair'),
+        'good' => t('good'),
+        'strong' => t('strong'),
+        'strong' => t('excellent'),
+      ),
+      'data' => array(
+        'username' => $username,
+        'email' => $email,
+      ),
+    );
+
+    // @todo Not being used for now. Might reimplement this using Ajax.
+    $element['#attributes']['data-password-strength'] = backdrop_json_encode($strength_settings, FALSE);
+  }
+
+  if ($element['#password_toggle']) {
+    $toggle_settings = array(
+      'toggleShowTitle' => t('Show password'),
+      'toggleHideTitle' => t('Hide password'),
+      'toggleDefault' => $element['#password_shown'] ? 'show' : 'hide',
+    );
+
+    $element['#attributes']['data-password-toggle'] = backdrop_json_encode($toggle_settings, FALSE);
+  }
+
+  if ($element['#password_strength'] || $element['#password_toggle']) {
+    $element['#attached']['js'][] = backdrop_get_path('module', 'zxcvbn') . '/js/user.js';
+  }
+  return $element;
+}
+
+/**
+ * Form element process handler for client-side password validation.
+ *
+ * This #process handler is automatically invoked for 'password_confirm' form
+ * elements to add the JavaScript and string translations for dynamic password
+ * validation.
+ *
+ * @see system_element_info()
+ */
+function zxcvbn_form_process_password_confirm($element) {
+  $confirm_settings = array(
+    'confirmTitle' => t('Passwords match: '),
+    'confirmSuccess' => t('yes'),
+    'confirmFailure' => t('no'),
+  );
+
+  $element['#attached']['js'][] = backdrop_get_path('module', 'zxcvbn') . '/js/user.js';
+  $element['pass2']['#attributes']['data-password-confirm'] = backdrop_json_encode($confirm_settings, FALSE);
+
+  return $element;
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * @see user_account_form()
+ */
+function zxcvbn_form_alter(&$form, &$form_state, $form_id) {
+  if (!in_array($form_id, ['user_account_form', 'user_pass_reset_form', 'user_profile_form', 'user_register_form', 'user_form_process_password'])) {
+    return;
+  }
+
+  // Replace validation which is enabled if someone enables "Reject weak passwords".
+  if (in_array('user_password_policy_validate', $form['#validate'])) {
+    // Add own validation instead.
+    $form['#validate'] = array_filter($form['#validate'], static function   ($element) {
+      return $element !== 'user_password_policy_validate';
+    });
+    $form['#validate'][] = 'zxcvbn_password_policy_validate';
+
+    // user_profile_form
+    if (isset($form['account']['pass']['#description'])) {
+      $form['account']['pass']['#description'] = _zxcvbn_password_policy_help();
+    }
+
+    if (isset($form['pass']['#description'])) {
+      $form['pass']['#description'] = _zxcvbn_password_policy_help();
+    }
+  }
+}
+
+// @todo also alter user_admin_settings:
+// $form['password_policy']['#description']
+
+/**
+ * Validation callback for password constraints.
+ *
+ * @see user_account_form()
+ * @see user_pass_reset_form()
+ */
+function zxcvbn_password_policy_validate($form, &$form_state) {
+  $strength = 0;
+  if (!array_key_exists('pass', $form_state['values'])) {
+    // If mail verification is required, user registration forms don't have a
+    // password field.
+    return;
+  }
+  $password = trim($form_state['values']['pass']);
+
+  if ($form['#form_id'] == 'user_profile_form' && strlen($password) == 0) {
+    // On profile form and no new password has been set.
+    return;
+  }
+  if ($form['#form_id'] == 'user_pass_reset_form') {
+    $account = $form['#account'];
+    $username = $account->name;
+    $email = $account->mail;
+  }
+  else {
+    $username = $form_state['values']['name'];
+    $email = $form_state['values']['mail'];
+  }
+
+  $strength = _zxcvbn_password_evaluate_strength($password, $username, $email);
+
+  if ($strength['score'] < 2) {
+    $warning = $strength['feedback']['warning'] ? $strength['feedback']['warning'] . '.' : '';
+    $suggestions = $strength['feedback']['suggestions'] ? 'Consider:' . theme('item_list', ['items' => $strength['feedback']['suggestions'], 'type' => 'ul']) : '';
+    form_set_error('complex_pass', t('The password is too weak. @warning !suggestions', ['@warning' => $warning, '!suggestions' => $suggestions]));
+  }
+
+  if (backdrop_strtolower($password) == backdrop_strtolower($username)) {
+    form_set_error('username_pass', t('The password cannot be the same as the username.'));
+  }
+  if (backdrop_strtolower($password) == backdrop_strtolower($email)) {
+    form_set_error('email_pass', t('The password cannot be the same as the email.'));
+  }
+}
+
+/**
+ * Evaluate password strength
+ * Adapted from https://github.com/dropbox/zxcvbn.
+ *
+ * @param string $password
+ * @param string $username
+ * @param string $email
+ *
+ * @return array
+ *   An array including:
+ *     - score: An integer representing password strength.
+ *     - feedback
+ */
+function _zxcvbn_password_evaluate_strength($password, $username, $email) {
+  $zxcvbn = new ZxcvbnPhp\Zxcvbn();
+  return $zxcvbn->passwordStrength($password, [$username, $email]);
+}
+
+/**
+ * Generates help text for core password constraints on forms.
+ *
+ * @see user_account_form()
+ */
+function _zxcvbn_password_policy_help() {
+  $criteria = array();
+  $criteria[] = t('The password cannot be the same as the username or email address.');
+  $criteria[] = t('The password is weaker if it includes any common patterns like dates, repeating characters, sequences, and keyboard patterns.');
+  $criteria[] = t('The password is weaker if it includes commonly-used passwords, common American names and surnames or common English words.');
+
+  return t('The following criteria must be met:') . '</div>' . theme('item_list', array('items' => $criteria, 'type' => 'ul'));
+}
