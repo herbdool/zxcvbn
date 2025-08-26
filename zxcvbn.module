@@ -314,10 +314,10 @@ function _zxcvbn_password_evaluate_strength($password, $user_input) {
   $zxcvbn = new ZxcvbnPhp\Zxcvbn();
   $warning = '';
   if (isset($user_input['username']) && backdrop_strtolower($password) == backdrop_strtolower($user_input['username'])) {
-    $warning = t('The password cannot be the same as the username');
+    $warning = t('The password should not be the same as the username');
   }
   if (isset($user_input['email']) && backdrop_strtolower($password) == backdrop_strtolower($user_input['email'])) {
-    $warning = t('The password cannot be the same as the email');
+    $warning = t('The password should not be the same as the email');
   }
   $strength = [
     'score' => 0,
