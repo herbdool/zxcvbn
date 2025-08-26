@@ -241,9 +241,24 @@ function zxcvbn_password_policy_validate($form, &$form_state) {
   else {
     $username = $form_state['values']['name'];
     $email = $form_state['values']['mail'];
+
+    $user_input = [$username, $email];
+    foreach ($form_state['values'] as $key => $value) {
+      if (strpos($key, 'field_') !== FALSE) {
+        foreach ($value as $languages) {
+          foreach ($languages as $item) {
+            // Include field types that have a value.
+            // @todo include other field types.
+            if (isset($item['value'])) {
+              $user_input[] = $item['value'];
+            }
+          }
+        }
+      }
+    }
   }
 
-  $strength = _zxcvbn_password_evaluate_strength($password, [$username, $email]);
+  $strength = _zxcvbn_password_evaluate_strength($password, $user_input);
 
   if ($strength['score'] < 2) {
     $warning = $strength['feedback']['warning'] ? $strength['feedback']['warning'] . '.' : '';
@@ -261,6 +276,9 @@ function zxcvbn_password_policy_validate($form, &$form_state) {
 
 /**
  * AJAX callback
+ *
+ * @return array
+ *   Returned as JSON via backdrop_json_delivery
  */
 function zxcvbn_password_strength_feedback() {
   $strength = [];
@@ -276,8 +294,8 @@ function zxcvbn_password_strength_feedback() {
  *
  * @param string $password
  * @param array $user_input
- *   An array of username, email and other field info. The strings are taken
- *   into account.
+ *   An array of username, email and other user input. The strings are taken
+ *   into account in the algorithm.
  *
  * @return array
  *   An array including:
