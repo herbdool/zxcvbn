@@ -106,6 +106,7 @@ function zxcvbn_form_process_password($element, $form_state = array()) {
       $email = (isset($user->mail) ? $user->mail : '');
     }
     $strength_settings = array(
+      'threshold' => settings_get('zxcvbn_password_strength_threshold', 2),
       'scores' => array(
         ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK => 'weak',
         ZXCVBN_PASSWORD_STRENGTH_WEAK => 'weak',
@@ -119,7 +120,7 @@ function zxcvbn_form_process_password($element, $form_state = array()) {
         ZXCVBN_PASSWORD_STRENGTH_WEAK => t('weak'),
         ZXCVBN_PASSWORD_STRENGTH_FAIR => t('fair'),
         ZXCVBN_PASSWORD_STRENGTH_GOOD => t('good'),
-        ZXCVBN_PASSWORD_STRENGTH_STRONG => t('strong'),
+        ZXCVBN_PASSWORD_STRENGTH_STRONG => t('excellent'),
       ),
       'data' => array(
         'username' => $username,
@@ -200,11 +201,12 @@ function zxcvbn_form_alter(&$form, &$form_state, $form_id) {
       });
       $form['#validate'][] = 'zxcvbn_password_policy_validate';
 
+      // Rely on dynamic instead of static feedback.
       if (isset($form['account']['pass']['#description'])) {
-        $form['account']['pass']['#description'] = $help;
+        $form['account']['pass']['#description'] = '';
       }
       if (isset($form['pass']['#description'])) {
-        $form['pass']['#description'] = $help;
+        $form['pass']['#description'] = '';
       }
     }
 
@@ -242,7 +244,10 @@ function zxcvbn_password_policy_validate($form, &$form_state) {
     $username = $form_state['values']['name'];
     $email = $form_state['values']['mail'];
 
-    $user_input = [$username, $email];
+    $user_input = [
+      'username' => $username,
+      'email' => $email,
+    ];
     foreach ($form_state['values'] as $key => $value) {
       if (strpos($key, 'field_') !== FALSE) {
         foreach ($value as $languages) {
@@ -260,7 +265,7 @@ function zxcvbn_password_policy_validate($form, &$form_state) {
 
   $strength = _zxcvbn_password_evaluate_strength($password, $user_input);
 
-  if ($strength['score'] < 2) {
+  if ($strength['score'] < settings_get('zxcvbn_password_strength_threshold', 2)) {
     $warning = $strength['feedback']['warning'] ? $strength['feedback']['warning'] . '.' : '';
     $suggestions = $strength['feedback']['suggestions'] ? 'Consider:' . theme('item_list', ['items' => $strength['feedback']['suggestions'], 'type' => 'ul']) : '';
     form_set_error('complex_pass', t('The password is too weak. @warning !suggestions', ['@warning' => $warning, '!suggestions' => $suggestions]));
@@ -284,7 +289,10 @@ function zxcvbn_password_strength_feedback() {
   $strength = [];
   if (!empty($_POST['passwordInput'])) {
     $settings = $_POST['passwordStrengthSettings'];
-    $strength = _zxcvbn_password_evaluate_strength($_POST['passwordInput'], [$settings['data']['username'], $settings['data']['email']]);
+    $strength = _zxcvbn_password_evaluate_strength($_POST['passwordInput'], [
+      'username' => $settings['data']['username'],
+      'email' => $settings['data']['email'],
+    ]);
   }
   return $strength;
 }
@@ -304,7 +312,24 @@ function zxcvbn_password_strength_feedback() {
  */
 function _zxcvbn_password_evaluate_strength($password, $user_input) {
   $zxcvbn = new ZxcvbnPhp\Zxcvbn();
-  return $zxcvbn->passwordStrength($password, $user_input);
+  $warning = '';
+  if (isset($user_input['username']) && backdrop_strtolower($password) == backdrop_strtolower($user_input['username'])) {
+    $warning = t('The password cannot be the same as the username');
+  }
+  if (isset($user_input['email']) && backdrop_strtolower($password) == backdrop_strtolower($user_input['email'])) {
+    $warning = t('The password cannot be the same as the email');
+  }
+  $strength = [
+    'score' => 0,
+    'feedback' => [
+      'warning' => $warning,
+      'suggestions' => [],
+    ]
+  ];
+  if (!$warning) {
+    $strength = $zxcvbn->passwordStrength($password, array_values($user_input));
+  }
+  return $strength;
 }
 
 /**
@@ -313,13 +338,29 @@ function _zxcvbn_password_evaluate_strength($password, $user_input) {
  * @see user_account_form()
  */
 function _zxcvbn_password_policy_help() {
+  // Label the threshold for the password description.
+  $strength_threshold = settings_get('zxcvbn_password_strength_threshold', 2);
+
+  if ($strength_threshold < ZXCVBN_PASSWORD_STRENGTH_FAIR) {
+    $threshold_label = array('weak' => t('weak'));
+  }
+  elseif ($strength_threshold < ZXCVBN_PASSWORD_STRENGTH_GOOD) {
+    $threshold_label = array('fair' => t('fair'));
+  }
+  elseif ($strength_threshold < ZXCVBN_PASSWORD_STRENGTH_STRONG) {
+    $threshold_label = array('good' => t('good'));
+  }
+  else {
+    $threshold_label = array('strong' => t('excellent'));
+  }
+
   $criteria = array();
   $criteria[] = t('The password cannot be the same as the username or email address.');
   $criteria[] = t('The password is stronger if it does not include any common patterns like dates, repeating characters, sequences, and keyboard patterns.');
   $criteria[] = t('The password is stronger if it does not include commonly-used passwords, common American names and surnames, nor common English words.');
 
-  $help = '<div class="password-strength-help-text fair">' . t('The password strength indicator must be %threshold or better.', array('%threshold' => t('fair')));
-  $help .= ' ' . t('Meet the following criteria:') . '</div>' . theme('item_list', array('items' => $criteria, 'type' => 'ul'));
+  $help = '<div class="password-strength-help-text ' . key($threshold_label) . '">' . t('The password strength indicator must be %threshold or better.', array('%threshold' => current($threshold_label)));
+  $help .= ' ' . t('The password strength will be estimated via <a href="@url">Zxcvbn</a> and custom criteria:', ['@url' => 'https://github.com/bjeavons/zxcvbn-php']) . '</div>' . theme('item_list', array('items' => $criteria, 'type' => 'ul'));
 
   return $help;
 }

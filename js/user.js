@@ -8,11 +8,12 @@ Backdrop.behaviors.passwordStrength = {
     $('input[data-password-strength]', context).once('password-strength', function () {
       var $passwordInput = $(this);
       var passwordStrengthSettings = $passwordInput.data('passwordStrength');
-      var passwordMeter = '<span class="password-strength"><span class="password-strength-title">' + passwordStrengthSettings.labels.strengthTitle + '</span><span class="password-strength-text" aria-live="assertive"></span><span class="password-indicator"><span class="indicator"></span></span></span>';
+      var passwordMeter = '<span class="password-strength"><span class="password-strength-title">' + passwordStrengthSettings.labels.strengthTitle + '</span><span class="password-strength-text" aria-live="assertive"></span><span class="password-indicator"><span class="indicator"></span></span><span class="password-strength-help"></span></span>';
       $passwordInput.wrap('<span class="password-strength-wrapper"></span>').after(passwordMeter);
       var $innerWrapper = $passwordInput.parent();
       var $indicatorBar = $innerWrapper.find('.indicator');
       var $strengthText = $innerWrapper.find('.password-strength-text');
+      var $strengthHelp = $innerWrapper.find('.password-strength-help');
       var $strengthWrapper = $innerWrapper.find('.password-strength');
 
       // Check the password strength.
@@ -33,6 +34,24 @@ Backdrop.behaviors.passwordStrength = {
 
             // Update the strength indication text.
             $strengthText.html(passwordStrengthSettings.labels[result.score]);
+
+            let help = '';
+            // Update the strength help text.
+            if (result.feedback !== undefined) {
+              if (result.feedback.warning.length > 0) {
+                help = '<p>' + result.feedback.warning + '.</p>';
+              }
+              if (result.feedback.suggestions.length > 0) {
+                let suggestions = '<ul>';
+                result.feedback.suggestions.forEach(function (suggestion) {
+                  suggestions += '<li>' + suggestion + '</li>';
+                });
+                suggestions += '</ul>'
+                help += suggestions;
+              }
+
+            }
+            $strengthHelp.html(help);
 
             // Give a class to the strength.
             $strengthWrapper.attr('class', 'password-strength ' + passwordStrengthSettings.scores[result.score]);
