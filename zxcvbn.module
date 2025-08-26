@@ -1,13 +1,13 @@
 <?php
 
 /**
- * @file module
+ * @file
  * ZXCVBN Password Strength Estimator
  *
  */
 
 /**
- * Password strength levels: weak, fair, good and strong.
+ * Password strength levels: very weak, weak, fair, good and strong.
  */
 define('ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK', 0);
 define('ZXCVBN_PASSWORD_STRENGTH_WEAK', 1);
@@ -107,7 +107,7 @@ function zxcvbn_form_process_password($element, $form_state = array()) {
     }
     $strength_settings = array(
       'scores' => array(
-        ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK => 'very-weak',
+        ZXCVBN_PASSWORD_STRENGTH_VERY_WEAK => 'weak',
         ZXCVBN_PASSWORD_STRENGTH_WEAK => 'weak',
         ZXCVBN_PASSWORD_STRENGTH_FAIR => 'fair',
         ZXCVBN_PASSWORD_STRENGTH_GOOD => 'good',
@@ -127,7 +127,6 @@ function zxcvbn_form_process_password($element, $form_state = array()) {
       ),
     );
 
-    // @todo Not being used for now. Might reimplement this using Ajax.
     $element['#attributes']['data-password-strength'] = backdrop_json_encode($strength_settings, FALSE);
   }
 
@@ -173,9 +172,21 @@ function zxcvbn_form_process_password_confirm($element) {
  * Implements hook_form_alter().
  *
  * @see user_account_form()
+ * @see user_pass_reset_form()
+ * @see user_profile_form()
+ * @see user_register_form()
+ * @see user_form_process_password()
+ * @see user_admin_settings()
  */
 function zxcvbn_form_alter(&$form, &$form_state, $form_id) {
-  $form_ids = ['user_account_form', 'user_pass_reset_form', 'user_profile_form', 'user_register_form', 'user_form_process_password', 'user_admin_settings'];
+  $form_ids = [
+    'user_account_form',
+    'user_pass_reset_form',
+    'user_profile_form',
+    'user_register_form',
+    'user_form_process_password',
+    'user_admin_settings',
+  ];
   if (in_array($form_id, $form_ids)) {
     $help = _zxcvbn_password_policy_help();
 
@@ -184,7 +195,7 @@ function zxcvbn_form_alter(&$form, &$form_state, $form_id) {
     $reject_weak_passwords = config_get('system.core', 'user_password_reject_weak');
     if ($reject_weak_passwords && in_array('user_password_policy_validate', $form['#validate'])) {
       // Add own validation instead.
-      $form['#validate'] = array_filter($form['#validate'], static function   ($element) {
+      $form['#validate'] = array_filter($form['#validate'], static function ($element) {
         return $element !== 'user_password_policy_validate';
       });
       $form['#validate'][] = 'zxcvbn_password_policy_validate';
@@ -232,7 +243,7 @@ function zxcvbn_password_policy_validate($form, &$form_state) {
     $email = $form_state['values']['mail'];
   }
 
-  $strength = _zxcvbn_password_evaluate_strength($password, $username, $email);
+  $strength = _zxcvbn_password_evaluate_strength($password, [$username, $email]);
 
   if ($strength['score'] < 2) {
     $warning = $strength['feedback']['warning'] ? $strength['feedback']['warning'] . '.' : '';
@@ -255,7 +266,7 @@ function zxcvbn_password_strength_feedback() {
   $strength = [];
   if (!empty($_POST['passwordInput'])) {
     $settings = $_POST['passwordStrengthSettings'];
-    $strength = _zxcvbn_password_evaluate_strength($_POST['passwordInput'], $settings['data']['username'], $settings['data']['email']);
+    $strength = _zxcvbn_password_evaluate_strength($_POST['passwordInput'], [$settings['data']['username'], $settings['data']['email']]);
   }
   return $strength;
 }
@@ -264,17 +275,18 @@ function zxcvbn_password_strength_feedback() {
  * Evaluate password strength
  *
  * @param string $password
- * @param string $username
- * @param string $email
+ * @param array $user_input
+ *   An array of username, email and other field info. The strings are taken
+ *   into account.
  *
  * @return array
  *   An array including:
  *     - score: An integer representing password strength.
  *     - feedback
  */
-function _zxcvbn_password_evaluate_strength($password, $username, $email) {
+function _zxcvbn_password_evaluate_strength($password, $user_input) {
   $zxcvbn = new ZxcvbnPhp\Zxcvbn();
-  return $zxcvbn->passwordStrength($password, [$username, $email]);
+  return $zxcvbn->passwordStrength($password, $user_input);
 }
 
 /**
